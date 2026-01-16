@@ -1,0 +1,34 @@
+{
+    "physics": {
+        "linkDistance": 50,
+        "linkStrength": 1,
+        "repulsionBase": -100,
+        "repulsionDegreeFactor": 15,
+        "gravityStrength": 0.1,
+        "collisionStrength": 1
+    },
+    "visuals": {
+        "nodeRadiusBase": 2,
+        "nodeRadiusDegreeFactor": 1.5,
+        "labelZoomBaseThreshold": 10.0,
+        "labelDegreeFactor": 2.0,
+        "collisionRadiusBase": 3,
+        "showControls": true,
+        "palette": [
+            "#1f77b4",
+            "#ff7f0e",
+            "#2ca02c",
+            "#d62728",
+            "#9467bd",
+            "#8c564b",
+            "#e377c2",
+            "#7f7f7f",
+            "#bcbd22",
+            "#17becf"
+        ]
+    },
+    "controls": {
+        "panSensitivity": 20,
+        "zoomSensitivity": 1.2
+    }
+}

@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>axiom</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            color: #ccc;
+            font-family: sans-serif;
+        }
+
+        #graph {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        .node text,
+        .label {
+            fill: #ccc;
+            font-size: 5px;
+            font-family: monospace;
+            pointer-events: none;
+            opacity: 0.7;
+        }
+
+        .link {
+            stroke: #555;
+            stroke-opacity: 0.6;
+            stroke-width: 1px;
+        }
+
+        .active-label {
+            opacity: 1;
+            font-size: 7px;
+            font-weight: bold;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(26, 26, 26, 0.8);
+            border: 1px solid #333;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #888;
+            pointer-events: none;
+            line-height: 1.6;
+            backdrop-filter: blur(2px);
+            opacity: 0;
+            transition: opacity 1s ease;
+        }
+
+        #controls b {
+            color: #ccc;
+            font-size: 14px;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .warning {
+            color: #e67e22;
+            margin-top: 5px;
+            display: block;
+            font-style: italic;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="graph"></div>
+    <div id="controls">
+        <b>Controls</b>
+        <div><span style="color: #fff">h j k l</span> &nbsp; Pan Camera</div>
+        <div><span style="color: #fff">+ / -</span> &nbsp; &nbsp; Zoom Level</div>
+        <div class="warning">⚠ Disable Vimium/Vim extensions</div>
+    </div>
+
+    <div id="welcome-screen"
+        style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #444; font-family: sans-serif; pointer-events: none;">
+        <h1 style="font-size: 24px; margin-bottom: 10px; color: #666;">No Notes Found</h1>
+        <p style="font-size: 14px;">axiom is running, but the directory is empty.</p>
+        <p style="font-size: 14px; margin-top: 20px; color: #888;">Create some <code
+                style="background: #222; padding: 3px 6px; border-radius: 4px;">.md</code> files to get started.</p>
+    </div>
+
+    <script>
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        const zoomBehavior = d3.zoom().on("zoom", (event) => {
+            g.attr("transform", event.transform);
+
+            // Semantic Zoom: Toggle display of the dedicated label layer
+            g.selectAll(".label").style("display", d => {
+                const degreeFactor = window.graphConfig?.visuals?.labelDegreeFactor || 1.0;
+                const threshold = window.graphConfig?.visuals?.labelZoomBaseThreshold || 1.5;
+                const val = event.transform.k * (1 + Math.sqrt(d.degree || 0) * degreeFactor);
+                return val > threshold ? "block" : "none";
+            });
+        });
+
+        const svgRoot = d3.select("#graph")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .call(zoomBehavior);
+
+        // Resize Handler
+        window.addEventListener('resize', () => {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            svgRoot.attr("width", w).attr("height", h);
+            simulation.force("center", d3.forceCenter(w / 2, h / 2));
+            simulation.alpha(0.3).restart();
+        });
+
+        const g = svgRoot.append("g");
+
+        // State for controls visibility
+        let controlsInitialized = false;
+
+        // Keyboard Navigation (Vim style)
+        window.addEventListener("keydown", (e) => {
+            const step = window.graphConfig?.controls?.panSensitivity || 20;
+            const zoomFactor = window.graphConfig?.controls?.zoomSensitivity || 1.2;
+
+            switch (e.key) {
+                case "h":
+                case "ArrowLeft":
+                    svgRoot.call(zoomBehavior.translateBy, step, 0);
+                    break;
+                case "l":
+                case "ArrowRight":
+                    svgRoot.call(zoomBehavior.translateBy, -step, 0);
+                    break;
+                case "j":
+                case "ArrowDown":
+                    svgRoot.call(zoomBehavior.translateBy, 0, -step);
+                    break;
+                case "k":
+                case "ArrowUp":
+                    svgRoot.call(zoomBehavior.translateBy, 0, step);
+                    break;
+                case "=": // + key (often requires shift, but = handles unshifted)
+                case "+":
+                    svgRoot.call(zoomBehavior.scaleBy, zoomFactor);
+                    break;
+                case "-":
+                    svgRoot.call(zoomBehavior.scaleBy, 1 / zoomFactor);
+                    break;
+                case "-":
+                    svgRoot.call(zoomBehavior.scaleBy, 1 / zoomFactor);
+                    break;
+            }
+        });
+
+        // --- Empty State Logic ---
+        function updateEmptyState(nodeCount) {
+            const welcome = document.getElementById("welcome-screen");
+            if (nodeCount === 0) {
+                welcome.style.display = "block";
+                d3.select("#controls").style("display", "none"); // Hide controls if empty
+            } else {
+                welcome.style.display = "none";
+            }
+        }
+
+        // --- Z-LAYERS ---
+        // 1. Links (Bottom)
+        const linkGroup = g.append("g").attr("class", "links");
+        // 2. Nodes (Middle)
+        const nodeGroup = g.append("g").attr("class", "nodes");
+        // 3. Labels (Top)
+        const labelGroup = g.append("g").attr("class", "labels");
+
+        let simulation = d3.forceSimulation()
+            .alphaDecay(0.01) // Slower cooling (allows more time to settle)
+            .force("link", d3.forceLink().id(d => d.id).distance(50).strength(1))
+            .force("charge", d3.forceManyBody().strength(-200).theta(0.9))
+            .force("collide", d3.forceCollide().radius(5).strength(1).iterations(3)) // More robust collision detection
+            .force("center", d3.forceCenter(width / 2, height / 2))
+            .force("x", d3.forceX(width / 2).strength(0.1))
+            .force("y", d3.forceY(height / 2).strength(0.1));
+
+        let link = linkGroup.selectAll(".link");
+        let node = nodeGroup.selectAll(".node");
+        let label = labelGroup.selectAll(".label");
+
+        // --- Socket.io Client ---
+        const socket = io();
+
+        socket.on('graph-update', (data) => {
+            updateGraph(data);
+        });
+
+        function updateGraph(data) {
+            window.graphConfig = data.config;
+
+            updateEmptyState(data.nodes.length);
+
+            // Initialize controls visibility based on config
+            if (!controlsInitialized && data.config?.visuals) {
+                const show = data.config.visuals.showControls !== false; // Default true
+                const controls = document.getElementById("controls");
+                if (controls) {
+                    if (show) {
+                        controls.style.opacity = "1";
+                        setTimeout(() => controls.style.opacity = "0", 5000);
+                    } else {
+                        controls.style.opacity = "0";
+                        controls.style.display = "none";
+                    }
+                }
+                controlsInitialized = true;
+            }
+
+            // Preserve node positions to prevent jitter on update
+            const oldNodes = new Map(simulation.nodes().map(d => [d.id, d]));
+            data.nodes.forEach(n => {
+                const old = oldNodes.get(n.id);
+                if (old) {
+                    n.x = old.x;
+                    n.y = old.y;
+                    n.vx = old.vx;
+                    n.vy = old.vy;
+                } else {
+                    // Spawn new nodes scattered across the screen to avoid initial clumps
+                    n.x = Math.random() * width;
+                    n.y = Math.random() * height;
+                }
+            });
+
+            // Calculate degrees
+            const degree = {};
+            data.links.forEach(l => {
+                const s = (typeof l.source === 'object') ? l.source.id : l.source;
+                const t = (typeof l.target === 'object') ? l.target.id : l.target;
+                degree[s] = (degree[s] || 0) + 1;
+                degree[t] = (degree[t] || 0) + 1;
+            });
+            data.nodes.forEach(n => { n.degree = degree[n.id] || 0; });
+
+            // Apply Config to Physics
+            if (data.config) {
+                const physics = data.config.physics || {};
+                const visuals = data.config.visuals || {};
+
+                simulation.force("link")
+                    .distance(physics.linkDistance || 50)
+                    .strength(physics.linkStrength || 1);
+
+                simulation.force("charge")
+                    .strength(d => (physics.repulsionBase || -100) - ((d.degree || 0) * (physics.repulsionDegreeFactor || 10)))
+                    .theta(0.9);
+
+                simulation.force("collide")
+                    .radius(d => (visuals.collisionRadiusBase || 6) + Math.sqrt(d.degree || 0) * (visuals.collisionRadiusDegreeFactor ||
+                        1.5))
+                    .strength(physics.collisionStrength || 1)
+                    .iterations(3);
+
+                simulation.force("x").strength(physics.gravityStrength || 0.1);
+                simulation.force("y").strength(physics.gravityStrength || 0.1);
+            }
+
+            simulation.nodes(data.nodes);
+            simulation.force("link").links(data.links);
+
+            // Dynamic Zoom Limits
+            // As graph grows, allow zooming out further (smaller scale)
+            const nodeCount = data.nodes.length;
+            const minZoom = nodeCount > 0 ? 1 / Math.max(2, Math.sqrt(nodeCount) * 0.8) : 0.1;
+            const maxZoom = 3.5;
+            zoomBehavior.scaleExtent([minZoom, maxZoom]);
+
+            // --- Render: Links (Layer 1) ---
+            link = link.data(data.links, d => `${d.source.id}-${d.target.id}`);
+            link.exit().remove();
+            const linkEnter = link.enter().append("line").attr("class", "link");
+            link = linkEnter.merge(link);
+
+            // --- Render: Nodes (Layer 2) ---
+            node = node.data(data.nodes, d => d.id);
+            node.exit().remove();
+
+            const nodeEnter = node.enter().append("circle")
+                .attr("class", "node")
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+
+            nodeEnter.append("title").text(d => d.id);
+            node = nodeEnter.merge(node);
+
+            // Update Node Visuals
+            node.attr("r", d => (data.config?.visuals?.nodeRadiusBase || 4) + Math.sqrt(d.degree || 0) *
+                (data.config?.visuals?.nodeRadiusDegreeFactor || 3))
+                .attr("fill", d => {
+                    if (data.palette && data.palette.length > 0) return data.palette[((d.degree || 0) + 1) % data.palette.length];
+                    return "#69b3a2";
+                });
+
+            // --- Render: Labels (Layer 3) ---
+            label = label.data(data.nodes, d => d.id);
+            label.exit().remove();
+
+            const labelEnter = label.enter().append("text")
+                .attr("class", "label")
+                .attr("text-anchor", "middle")
+                .text(d => d.id.length > 25 ? d.id.substring(0, 25) + "..." : d.id); // Truncate long names
+
+            label = labelEnter.merge(label);
+
+            // Update Label Visuals (Position below node)
+            const labelOffset = 8;
+            label.attr("dy", d => (data.config?.visuals?.nodeRadiusBase || 4) + Math.sqrt(d.degree || 0) *
+                (data.config?.visuals?.nodeRadiusDegreeFactor || 3) + labelOffset);
+
+
+            // --- Interactions (Hover Highlighting) ---
+            node.on("mouseover", (event, d) => highlight(d));
+            label.on("mouseover", (event, d) => highlight(d));
+            node.on("mouseout", resetHighlight);
+            label.on("mouseout", resetHighlight);
+
+            // --- Optimization: Pre-calculate Adjacency List ---
+            const linkedByIndex = {};
+            data.links.forEach(d => {
+                const s = (typeof d.source === 'object') ? d.source.id : d.source;
+                const t = (typeof d.target === 'object') ? d.target.id : d.target;
+                linkedByIndex[`${s},${t}`] = true;
+                linkedByIndex[`${t},${s}`] = true;
+            });
+
+            function isConnected(a, b) {
+                return linkedByIndex[`${a.id},${b.id}`] || a.id === b.id;
+            }
+
+
+
+            function highlight(d) {
+                // Dim everything not connected
+                // Use fast lookup instead of iterating links
+                node.style("opacity", o => isConnected(d, o) ? 1 : 0.1);
+                label.style("opacity", o => isConnected(d, o) ? 1 : 0.1);
+                link.style("stroke-opacity", o => (o.source.id === d.id || o.target.id === d.id) ? 1 : 0.1);
+            }
+
+            function resetHighlight() {
+                node.style("opacity", 1);
+                label.style("opacity", 0.7);
+                link.style("stroke-opacity", 0.6);
+            }
+
+            // --- Tick Function ---
+            simulation.on("tick", () => {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+
+                node
+                    .attr("cx", d => d.x)
+                    .attr("cy", d => d.y);
+
+                label
+                    .attr("x", d => d.x)
+                    .attr("y", d => d.y);
+            });
+
+            simulation.alpha(1).restart();
+        }
+
+        // --- Drag Functions ---
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+    </script>
+</body>
+
+</html>
