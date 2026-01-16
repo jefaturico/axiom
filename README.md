@@ -35,7 +35,7 @@ If you use `pywal`, it grabs your colors from `~/.cache/wal/colors.json`. Change
 ## Installation
 
 ### Binaries (Recommended)
-Download the latest release for your OS from the [Releases](https://github.com/yourusername/axiom/releases) page.
+Download the latest release for your OS from the [Releases](https://github.com/jefaturico/axiom/releases) page.
 
 *   **Windows**: Run `axiom-win.exe`.
 *   **macOS**: Run `axiom-macos`. (Note: you may need to Right Click -> Open to bypass the unverified developer warning).
