@@ -295,6 +295,56 @@ io.on('connection', (socket) => {
     socket.emit('graph-update', graphData);
 });
 
+// --- Auto-Kill Port ---
+function killPort(port) {
+    const { execSync } = require('child_process');
+
+    // Helper: Check if port is in use
+    function isPortInUse(p) {
+        try {
+            // lsof returns 0 if found, 1 if not
+            execSync(`lsof -i:${p}`, { stdio: 'ignore' });
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    try {
+        if (!isPortInUse(port)) return;
+
+        console.log(`Port ${port} is in use. Attempting to kill...`);
+        // Try fuser (common on Linux)
+        try {
+            execSync(`fuser -k ${port}/tcp`, { stdio: 'ignore' });
+        } catch (e) { /* ignore */ }
+
+        // Try lsof fallback
+        try {
+            const pid = execSync(`lsof -t -i:${port}`).toString().trim();
+            if (pid) process.kill(pid);
+        } catch (e) { /* ignore */ }
+
+        // Wait for it to clear (up to 2000ms)
+        const start = Date.now();
+        while (Date.now() - start < 2000) {
+            try {
+                execSync('sleep 0.1'); // Small system sleep
+            } catch (e) { }
+
+            if (!isPortInUse(port)) {
+                console.log(`Freed port ${port}`);
+                return;
+            }
+        }
+        console.error(`Failed to force free port ${port}. Startup might fail.`);
+    } catch (e) {
+        console.error("Auto-kill failed:", e.message);
+    }
+}
+
+killPort(PORT);
+
 server.listen(PORT, () => {
     // console.log(`Listening on *:${PORT}`);
     const url = `http://localhost:${PORT}`;

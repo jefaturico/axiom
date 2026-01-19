@@ -4,8 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "pkg ."
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
@@ -15,19 +14,5 @@
     "express": "^5.2.1",
     "socket.io": "^4.8.3"
   },
-  "bin": "server.js",
-  "pkg": {
-    "assets": [
-      "public/**/*",
-      "config.json"
-    ],
-    "targets": [
-      "node18-linux-x64",
-      "node18-macos-x64",
-      "node18-win-x64"
-    ]
-  },
-  "devDependencies": {
-    "pkg": "^5.8.1"
-  }
+  "bin": "server.js"
 }
